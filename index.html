@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PHDME: Physics-Informed Diffusion Models without Explicit Governing Equations</title>
+  <meta name="description" content="PHDME (Port-Hamiltonian Diffusion Model) learns physical structure from sparse observations with a GP-dPHS prior, augments data by posterior sampling, and guides diffusion training with uncertainty-weighted physics for reliable robot dynamics forecasting.">
+  <meta property="og:title" content="PHDME: Physics-Informed Diffusion Models without Explicit Governing Equations">
+  <meta property="og:description" content="Physically reliable diffusion forecasting of soft-robot dynamics from limited data — no governing equations required.">
+  <meta property="og:image" content="assets/video/phdme_poster.jpg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top"><span class="brand-bar"></span>PHDME</a>
+    <nav class="nav-links">
+      <a href="#motivation">Motivation</a>
+      <a href="#method">Method</a>
+      <a href="#benchmarks">Benchmarks</a>
+      <a href="#results">Results</a>
+      <a href="#citation">Citation</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="wrap">
+      <p class="eyebrow"><span class="dash"></span>Physics-informed diffusion &nbsp;/&nbsp; Robot dynamics</p>
+      <h1>PHDME: Physics-Informed Diffusion Models<br class="br-wide"> without Explicit Governing Equations</h1>
+      <p class="lede">A <strong>Port-Hamiltonian Diffusion Model</strong> that learns physical structure from a handful of trajectories,
+        then uses it to make diffusion forecasts of soft-robot dynamics accurate <em>and</em> physically reliable.</p>
+
+      <!-- TODO: add the author list and affiliations once the paper is de-anonymized. -->
+      <p class="authors">
+        <span class="author">Anonymous authors</span>
+      </p>
+      <p class="venue">Paper under double-blind review</p>
+
+      <div class="buttons">
+        <a class="btn btn-primary" href="paper/PHDME.pdf" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>
+          Paper
+        </a>
+        <!-- TODO: replace # with the arXiv / OpenReview link -->
+        <a class="btn" href="#" aria-disabled="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h4"/></svg>
+          arXiv <span class="soon">soon</span>
+        </a>
+        <!-- TODO: replace # with the public code repository -->
+        <a class="btn" href="#" aria-disabled="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>
+          Code <span class="soon">soon</span>
+        </a>
+        <a class="btn" href="#citation">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h4v4H7zM13 7h4v4h-4zM7 11c0 3-1 5-3 6M13 11c0 3-1 5-3 6"/></svg>
+          BibTeX
+        </a>
+      </div>
+
+      <figure class="hero-video">
+        <video autoplay muted loop playsinline preload="metadata" poster="assets/video/phdme_poster.jpg">
+          <source src="assets/video/phdme_overview.mp4" type="video/mp4">
+        </video>
+        <figcaption>PHDME at a glance on an illustrative soft robotic arm: why data-only fits drift, how the GP-dPHS prior and its
+          uncertainty guide training, and how the full spatiotemporal field is generated in one reverse-diffusion pass.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ TL;DR ============ -->
+  <section class="tldr">
+    <div class="wrap tldr-grid">
+      <div class="stat"><span class="stat-num">20</span><span class="stat-label">ground-truth trajectories is all PHDME sees per system</span></div>
+      <div class="stat"><span class="stat-num">~20&times;</span><span class="stat-label">faster generation than rolling out the GP-dPHS (0.2 s vs 4.1 s / sample)</span></div>
+      <div class="stat"><span class="stat-num">0</span><span class="stat-label">analytic governing equations needed for training or sampling</span></div>
+      <div class="stat"><span class="stat-num">3</span><span class="stat-label">benchmarks: synthetic string, 2D nonlinear membrane, real-world spring</span></div>
+    </div>
+  </section>
+
+  <!-- ============ MOTIVATION ============ -->
+  <section id="motivation" class="section">
+    <div class="wrap">
+      <p class="kicker">Motivation</p>
+      <h2>Why purely data-driven generative models aren't enough</h2>
+      <p class="section-lede">Diffusion and flow-matching models forecast complex dynamics well, but they learn the data distribution from
+        <em>lots</em> of data and know nothing about the physics that produced it. For a soft robot, both are a problem.</p>
+
+      <div class="cards three">
+        <article class="card">
+          <div class="card-icon warn">
+            <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><circle cx="8" cy="15" r="1.4"/><circle cx="13" cy="10" r="1.4"/><circle cx="18" cy="13" r="1.4"/></svg>
+          </div>
+          <h3>Data are scarce</h3>
+          <p>Generative models need many trajectories to learn a distribution. Fully instrumenting a soft robot with sensors is expensive
+            and physically difficult, so in practice we may only have a few recordings.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon warn">
+            <svg viewBox="0 0 24 24"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/></svg>
+          </div>
+          <h3>Predictions can be unphysical</h3>
+          <p>Even with enough data, a purely data-driven model can match dataset statistics while violating physical laws, e.g. letting a
+            fixed base drift. That is unacceptable for <strong>safety-critical</strong> soft robots.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon warn">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h6"/><path d="m17 15 4 4m0-4-4 4"/></svg>
+          </div>
+          <h3>Equations are unknown</h3>
+          <p>Physics-informed methods (PINNs, physics-informed diffusion) assume the governing PDE is known. For soft robots, deriving
+            first-principles equations from a few video frames is often impossible.</p>
+        </article>
+      </div>
+
+      <figure class="figure">
+        <img src="assets/img/fig1_soft_robot.webp" alt="A soft continuum manipulator, its top-down parameterization, and the resulting space-time image of displacement" loading="lazy">
+        <figcaption><b>Trajectories as images.</b> A soft-robot trajectory is parameterized so that one axis is position along the arm, the
+          other is physical time, and pixel value is displacement. Reverse diffusion then generates the entire spatiotemporal field at once,
+          with no autoregressive rollout and no error accumulation over time.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ METHOD ============ -->
+  <section id="method" class="section alt">
+    <div class="wrap">
+      <p class="kicker">Method</p>
+      <h2>Learn the physics first, then let it teach the diffusion model</h2>
+      <p class="section-lede">PHDME assumes only the <em>structure</em> of the system, namely that it is a distributed port-Hamiltonian system (dPHS).
+        The energy function (Hamiltonian) and the unknown coefficients are learned from data.</p>
+
+      <div class="equation-block">
+        <div class="eq" data-tex="\partial_t x(t,z) = (J - R)\,\delta_x \mathcal{H} + G_d\, u"></div>
+        <p class="eq-note"><span class="tag">J</span> power-preserving interconnection &nbsp;·&nbsp; <span class="tag">R</span> dissipation &nbsp;·&nbsp;
+          <span class="tag">G<sub>d</sub></span> input map &nbsp;·&nbsp; <span class="tag accent">𝓗</span> unknown Hamiltonian, modeled by a Gaussian process</p>
+      </div>
+
+      <figure class="figure wide">
+        <img src="assets/img/fig2_pipeline.webp" alt="Two-stage training pipeline of PHDME" loading="lazy">
+        <figcaption><b>Two-stage training.</b> Stage 1 learns a GP-dPHS physics prior from limited observations and samples its posterior to
+          synthesize a rich training set. Stage 2 trains the diffusion model with a reconstruction loss plus a floor-aware projection loss
+          that pulls predictions toward the frozen GP-dPHS dynamics.</figcaption>
+      </figure>
+
+      <ol class="steps">
+        <li class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <p class="step-stage">Stage 1 · Physics prior</p>
+            <h3>Learn a GP-dPHS from sparse observations</h3>
+            <p>A smooth GP interpolant of the sparse measurements provides state derivatives in closed form. A Gaussian process is placed on the
+              Hamiltonian, and because GPs are closed under linear operators this induces a GP over the dynamics with a physics-informed kernel:</p>
+            <div class="eq" data-tex="\partial_t x \sim \mathcal{GP}\big(\hat G u,\; k_{\mathrm{dphs}}(x,x')\big),\quad k_{\mathrm{dphs}} = \sigma_f^2\, \hat J_R\, \partial_x \exp\!\Big(-\tfrac{\|x-x'\|^2}{2l^2}\Big)\, \partial_{x'}^{\!\top} \hat J_R^{\top}"></div>
+            <p>Training maximizes the marginal likelihood. The result is a <strong>Bayesian</strong> physics prior that carries a mean and an
+              uncertainty for every predicted state rate.</p>
+          </div>
+        </li>
+        <li class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <p class="step-stage">Stage 1 · Data enhancement</p>
+            <h3>Sample the posterior to overcome data scarcity</h3>
+            <p>Rather than rolling out only the posterior mean, PHDME draws Hamiltonian gradients from the GP-dPHS posterior. Each draw is one
+              plausible dynamical system, which a numerical solver integrates under new initial conditions. The augmented dataset reflects
+              both <em>physics uncertainty</em> and <em>initial-condition variety</em>, enough to train a diffusion model from just 20 real trajectories.</p>
+          </div>
+        </li>
+        <li class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <p class="step-stage">Stage 2 · Uncertainty-weighted physics</p>
+            <h3>Guide the denoiser where the prior is confident</h3>
+            <p>For a denoised prediction <span class="m" data-tex="\hat A^{(0)}"></span>, the learned residual compares its finite-difference time
+              derivative with the rate the GP-dPHS predicts. The GP variance turns into a weight <span class="m" data-tex="W"></span>, so mismatches count more
+              where the prior is certain and less where it is not:</p>
+            <div class="eq" data-tex="r_{\mathrm{GP}}(B) = T_{\mathrm{op}}B - g_{\mathrm{GP}}(B),\qquad \big\| W^{1/2}\, r_{\mathrm{GP}}(B) \big\|_2^2"></div>
+          </div>
+        </li>
+        <li class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <p class="step-stage">Stage 2 · Floor-aware projection</p>
+            <h3>Project, then use the result as a stop-gradient target</h3>
+            <p>A damped Gauss–Newton / conjugate-gradient solve finds a nearby trajectory that better obeys the learned dynamics, keeping
+              initial and boundary values pinned. It stops once the residual reaches <span class="m" data-tex="r_{\text{floor}}"></span>, the level that real
+              observed trajectories attain, so the model never over-fits an imperfect operator.</p>
+            <div class="eq" data-tex="B^{(\ell+1)} = \arg\min_{B \in \mathcal{C}(c_{\text{init}})} \tfrac{\lambda}{2}\|B - \hat A^{(0)}\|_2^2 + \big\|W_\ell^{1/2}(T_{\mathrm{op}}B - g_\ell)\big\|_2^2"></div>
+            <div class="eq" data-tex="\mathcal{L}(\theta) = \mathcal{L}_{\mathrm{DDPM}}(\theta) + c_{\mathrm{res}}\; w_m^{\mathrm{phys}}\,\big\| \hat A^{(0)} - \mathrm{sg}\big[\Pi_{\mathrm{GP}}(\hat A^{(0)})\big] \big\|_2^2"></div>
+            <p>The GP-dPHS stays frozen; only the denoiser is trained. At test time an optional single projection (<b>+proj</b>) can further
+              tighten physical consistency.</p>
+          </div>
+        </li>
+      </ol>
+
+      <figure class="figure narrow">
+        <img src="assets/img/fig10_gp_surfaces.webp" alt="GP posterior means of the Hamiltonian gradients with sparse training observations" loading="lazy">
+        <figcaption><b>Learned energy.</b> GP posterior means for ∂𝓗/∂p and ∂𝓗/∂q on the string, with the sparse training observations overlaid.</figcaption>
+      </figure>
+      <figure class="figure">
+        <img src="assets/img/fig4_reverse_diffusion.webp" alt="Intermediate reverse-diffusion states for a string trajectory" loading="lazy">
+        <figcaption><b>Reverse diffusion.</b> Coherent oscillations emerge from noise while the two conditioning frames are retained.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ BENCHMARKS ============ -->
+  <section id="benchmarks" class="section">
+    <div class="wrap">
+      <p class="kicker">Benchmarks</p>
+      <h2>From synthetic PDEs to a real deformable system</h2>
+      <p class="section-lede">On every benchmark the GP-dPHS is fitted to only <strong>20 ground-truth trajectories</strong>. All learned models
+        (PHDME and baselines) train on the same GP-augmented data and are tested on held-out <em>true</em> trajectories.
+        Analytic equations are used only for evaluation.</p>
+
+      <div class="cards three">
+        <article class="card bench">
+          <p class="bench-tag">Synthetic · 1D</p>
+          <h3>Vibrating string</h3>
+          <p>Fixed-end wave equation in port-Hamiltonian form, with state <span class="m" data-tex="(p,q) = (\partial_z s,\, \partial_t s)"></span>.
+            Observations downsampled 50× to 1,639 rows. Tested on 1,000 held-out trajectories.</p>
+          <div class="eq small" data-tex="\partial_t p = \partial_z q,\quad \partial_t q = \partial_z p"></div>
+        </article>
+        <article class="card bench">
+          <p class="bench-tag">Synthetic · 2D nonlinear</p>
+          <h3>Nonlinear membrane</h3>
+          <p>A 2D Stokes–Dirac drum with saturating (tanh) co-energy on a 32×32×32 space–time grid. Separable isotropic GP Hamiltonian,
+            200 observation rows per gradient component. 500 test trajectories.</p>
+          <div class="eq small" data-tex="\partial_t p = \operatorname{div} e_q,\quad \partial_t \mathbf q = \nabla e_p"></div>
+        </article>
+        <article class="card bench">
+          <p class="bench-tag">Real world</p>
+          <h3>Oscillating spring</h3>
+          <p>A 41.9 cm extension spring with fixed ends, a stand-in for swinging cables or a soft robot arm. Filmed at 226 FPS; no closed-form
+            equations exist. 250 test trajectories.</p>
+          <ul class="mini-list">
+            <li>RGB segmentation → skeletonization → tracked centerline</li>
+            <li>Kalman filtering + GP smoothing for derivatives</li>
+            <li>Stored in a <strong>SQL database</strong> for querying and visualization</li>
+          </ul>
+        </article>
+      </div>
+
+      <figure class="figure">
+        <img src="assets/img/fig5_spring_pipeline.webp" alt="Real-world spring pipeline: raw frame, skeleton, tracked points, centerlines over time" loading="lazy">
+        <figcaption><b>Real-world spring data.</b> Raw camera frame, skeletonized centerline, spatially ordered tracked points, and tracked
+          centerlines at several times. The tracked trajectories are stored in a SQL database, which supports querying, filtering, and visualization
+          before they are converted into the physically consistent (p, q) representation.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ RESULTS ============ -->
+  <section id="results" class="section alt">
+    <div class="wrap">
+      <p class="kicker">Results</p>
+      <h2>Accurate and physically consistent forecasts</h2>
+      <p class="section-lede">Lower is better, except for spring E-cons, which should match the ground-truth value 0.527 for the damped spring. Hover a bar for exact values.</p>
+
+      <div class="results-panel">
+        <div class="controls">
+          <div class="seg" role="tablist" aria-label="System">
+            <button role="tab" data-system="string" aria-selected="true">String</button>
+            <button role="tab" data-system="membrane" aria-selected="false">Membrane</button>
+            <button role="tab" data-system="spring" aria-selected="false">Real-world spring</button>
+          </div>
+          <div class="seg" role="tablist" aria-label="Metric">
+            <button role="tab" data-metric="relL2" aria-selected="true">relL2</button>
+            <button role="tab" data-metric="oracle" aria-selected="false">Oracle-phys</button>
+            <button role="tab" data-metric="econs" aria-selected="false">E-cons</button>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <p class="chart-title" id="chart-title"></p>
+          <div class="chart" id="chart" aria-describedby="chart-title"></div>
+          <p class="chart-note" id="chart-note"></p>
+        </div>
+        <details class="table-view">
+          <summary>Show full table</summary>
+          <div class="table-scroll" id="table"></div>
+        </details>
+        <div class="tooltip" id="tooltip" role="status"></div>
+      </div>
+
+      <div class="findings">
+        <div class="finding"><span class="f-num">−35%</span><p><b>vs. DDPM on the string</b>: relL2 drops 0.637 → 0.413, and oracle-phys drops 0.574 → 0.183 (0.121 with +proj). Same network, data, and sampler; the only difference is the learned-physics loss.</p></div>
+        <div class="finding"><span class="f-num">4×</span><p><b>Lower analytic residual than GP rollout on the membrane</b> (0.106 vs 0.423). Integrating the GP prior directly is accurate but less physical on true states.</p></div>
+        <div class="finding"><span class="f-num">0.529</span><p><b>Energy behavior on the real spring</b> matches the ground-truth 0.527, while FieldPHNN keeps too much energy (0.386) and has 5× the error.</p></div>
+      </div>
+
+      <figure class="figure wide">
+        <img src="assets/img/fig3_spring.webp" alt="Real-world spring predictions under the same initial condition for all methods" loading="lazy">
+        <figcaption><b>Real-world spring.</b> p and q over position (vertical) and time (horizontal), with absolute error in p. PHDME, DDPM and
+          GP rollout agree closely; FieldPHNN develops spurious fronts in the second half of the run.</figcaption>
+      </figure>
+      <figure class="figure narrow">
+        <img src="assets/img/fig3_membrane.webp" alt="Nonlinear membrane momentum frames for PHDME+proj, DDPM and ground truth" loading="lazy">
+        <figcaption><b>2D membrane.</b> Momentum at five of 32 frames. PHDME +proj places the main lobes correctly; DDPM's error is larger in every frame shown.</figcaption>
+      </figure>
+
+      <h3 class="sub">Data enhancement matters under extreme scarcity</h3>
+      <p class="sub-lede">Baselines trained directly on the original limited observations, without the PHDME pipeline (string benchmark):</p>
+      <div class="table-scroll">
+        <table class="data">
+          <thead><tr><th>Training data</th><th>Model</th><th>relL2</th><th>oracle-phys</th><th>MSE</th></tr></thead>
+          <tbody>
+            <tr class="ours"><td>GP-augmented</td><td>PHDME +proj (ours)</td><td>0.397</td><td>0.121</td><td>1.47×10⁻³</td></tr>
+            <tr class="ours"><td>GP-augmented</td><td>PHDME (ours)</td><td>0.413</td><td>0.183</td><td>1.58×10⁻³</td></tr>
+            <tr><td>1,639 points</td><td>FieldPHNN</td><td>0.535</td><td>4.61×10²</td><td>1.24×10⁻¹</td></tr>
+            <tr><td>12 frame pairs</td><td>ConvNODE</td><td>0.422</td><td>1.649</td><td>3.62×10⁻³</td></tr>
+            <tr><td>1 trajectory</td><td>DDPM</td><td>2.297</td><td>2.002</td><td>4.36×10⁻²</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="split speed-split">
+        <div>
+          <h3 class="sub">~20× faster than integrating the prior</h3>
+          <p class="sub-lede">One reverse-diffusion chain generates the whole trajectory, so PHDME amortizes the expensive GP-dPHS solve.</p>
+          <div class="speed">
+            <div class="speed-row"><span class="speed-name">GP-dPHS rollout</span><div class="speed-track"><div class="speed-bar base" style="--w:100%"></div></div><span class="speed-val">4.1 s</span></div>
+            <div class="speed-row"><span class="speed-name">PHDME</span><div class="speed-track"><div class="speed-bar ours" style="--w:4.9%"></div></div><span class="speed-val">0.2 s</span></div>
+            <p class="speed-foot">Seconds per sample. 10,000 samples: 11 h 23 min vs 33 min.</p>
+          </div>
+        </div>
+        <div>
+          <h3 class="sub">Every component pulls its weight</h3>
+          <p class="sub-lede">Leave-one-out ablation on the string (relL2 after +proj, lower is better).</p>
+          <div class="table-scroll">
+            <table class="data compact">
+              <tbody>
+                <tr class="ours"><td>Full PHDME</td><td>0.410</td></tr>
+                <tr><td>− learned physics (DDPM)</td><td>0.670</td></tr>
+                <tr><td>Projection → raw residual loss</td><td>1.115</td></tr>
+                <tr><td>− floor-aware stopping</td><td>0.900</td></tr>
+                <tr><td>− GP-variance whitening</td><td>0.623</td></tr>
+                <tr><td>− SNR gate</td><td>3.072</td></tr>
+                <tr><td>− data-only warm-up</td><td>0.606</td></tr>
+                <tr><td>Fixed weight → GradNorm</td><td>0.541</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <figure class="figure wide">
+        <img src="assets/img/fig6_ablation.webp" alt="String leave-one-out ablation predictions under a shared initial condition" loading="lazy">
+        <figcaption><b>Ablations, visualized.</b> Removing the SNR gate or replacing the projection with a raw residual destroys the wave
+          structure; other removals introduce smaller phase and amplitude errors.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ CITATION ============ -->
+  <section id="citation" class="section">
+    <div class="wrap">
+      <p class="kicker">Citation</p>
+      <h2>BibTeX</h2>
+      <!-- TODO: update authors / venue once published -->
+      <div class="bibtex">
+        <button class="copy" type="button" data-copy="#bib">Copy</button>
+<pre id="bib">@article{anonymous2026phdme,
+  title   = {PHDME: Physics-Informed Diffusion Models without Explicit Governing Equations},
+  author  = {Anonymous},
+  journal = {Under review},
+  year    = {2026}
+}</pre>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <p>PHDME · Port-Hamiltonian Diffusion Model. Builds on GP-dPHS (L4DC 2024).</p>
+  </div>
+</footer>
+
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="assets/js/main.js"></script>
+</body>
+</html>
